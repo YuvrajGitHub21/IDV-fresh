@@ -751,7 +751,7 @@ export default function TemplateBuilder() {
     const stepToAdd = availableSteps.find((s) => s.id === stepId);
     if (stepToAdd) {
       setVerificationSteps((prev) => [...prev, { ...stepToAdd, isEnabled: true }]);
-      setCurrentSectionId(stepId);
+      // Do not change current section here; expansion will occur when user clicks Next
     }
   };
   const removeVerificationStep = (stepId: string) => {
