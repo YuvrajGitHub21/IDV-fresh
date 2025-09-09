@@ -881,7 +881,8 @@ export default function TemplateBuilder() {
   // Save only the current section, not all
   const saveCurrentSection = useCallback(
     async (currentStepNumber: number, sectionName: string) => {
-      if (!templateId) throw new Error("Missing template id");
+      // If there is no templateId (e.g., local build or demo), skip saving but allow navigation
+      if (!templateId) return;
 
       setSaving(true);
       setSaveError(null);
