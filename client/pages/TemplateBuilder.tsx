@@ -987,15 +987,14 @@ export default function TemplateBuilder() {
     } catch {}
   }, [verificationSteps]);
 
-  // Ensure current section is valid and expanded accordingly
+  // After reordering, always expand the first section in the left sidebar
   useEffect(() => {
-    if (!orderedSectionIds.includes(currentSectionId)) {
-      setCurrentSection(orderedSectionIds[0] || "personal-info");
-      return;
+    const first = orderedSectionIds[0] || "personal-info";
+    if (!orderedSectionIds.includes(currentSectionId) || currentSectionId !== first) {
+      setCurrentSection(first);
     }
-    setCurrentSection(currentSectionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSectionId, verificationSteps]);
+  }, [verificationSteps]);
 
   const handleSystemFieldFocus = (key: string) =>
     setSystemFieldAlerts((prev) => ({ ...prev, [key]: true }));
