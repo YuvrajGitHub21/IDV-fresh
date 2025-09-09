@@ -692,7 +692,7 @@ export default function TemplateBuilder() {
   const [personalInfoExpanded, setPersonalInfoExpanded] = useState(true);
   const [documentVerificationExpanded, setDocumentVerificationExpanded] = useState(false);
   const [biometricVerificationExpanded, setBiometricVerificationExpanded] = useState(false);
-  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  const [currentSectionId, setCurrentSectionId] = useState<string>("personal-info");
 
   // system fields (readonly UI)
   const [systemFieldAlerts, setSystemFieldAlerts] = useState<{ [key: string]: boolean }>({});
@@ -751,6 +751,7 @@ export default function TemplateBuilder() {
     const stepToAdd = availableSteps.find((s) => s.id === stepId);
     if (stepToAdd) {
       setVerificationSteps((prev) => [...prev, { ...stepToAdd, isEnabled: true }]);
+      setCurrentSectionId(stepId);
     }
   };
   const removeVerificationStep = (stepId: string) => {
@@ -784,7 +785,34 @@ export default function TemplateBuilder() {
     setOptionalFields((prev) => prev.map((f) => (f.id === fieldId ? { ...f, checked: false } : f)));
   };
 
-  const handlePrevious = () => navigate("/dashboard");
+  const orderedSectionIds = verificationSteps.map((s) => s.id);
+
+  const setCurrentSection = (id: string) => {
+    setCurrentSectionId(id);
+    setPersonalInfoExpanded(id === "personal-info");
+    setDocumentVerificationExpanded(id === "document-verification");
+    setBiometricVerificationExpanded(id === "biometric-verification");
+  };
+
+  const handlePrev = async () => {
+    const sectionSetters: Record<string, React.Dispatch<React.SetStateAction<boolean>>> = {
+      "personal-info": setPersonalInfoExpanded,
+      "document-verification": setDocumentVerificationExpanded,
+      "biometric-verification": setBiometricVerificationExpanded,
+    };
+
+    const activeSections = orderedSectionIds.map((id) => ({ name: id, setExpanded: sectionSetters[id] }));
+    const currentIndex = Math.max(0, activeSections.findIndex((s) => s.name === currentSectionId));
+
+    if (currentIndex <= 0) {
+      navigate("/dashboard");
+      return;
+    }
+
+    const prevIndex = currentIndex - 1;
+    activeSections[currentIndex].setExpanded(false);
+    setCurrentSection(activeSections[prevIndex].name);
+  };
 
   /* ============ Payload builders (root-level, match Swagger) ============ */
   const buildPersonalPayload = () => ({
@@ -909,35 +937,30 @@ export default function TemplateBuilder() {
 
   /* ============ Next button ============ */
   const handleNext = async () => {
-    const sections = [
-      { name: "personal-info", setExpanded: setPersonalInfoExpanded },
-      { name: "document-verification", setExpanded: setDocumentVerificationExpanded },
-      { name: "biometric-verification", setExpanded: setBiometricVerificationExpanded },
-    ];
+    const sectionSetters: Record<string, React.Dispatch<React.SetStateAction<boolean>>> = {
+      "personal-info": setPersonalInfoExpanded,
+      "document-verification": setDocumentVerificationExpanded,
+      "biometric-verification": setBiometricVerificationExpanded,
+    };
 
-    const activeSections = sections.filter(
-      (section) =>
-        section.name === "personal-info" ||
-        verificationSteps.some((s) => s.id === section.name),
-    );
+    const activeSections = orderedSectionIds.map((id) => ({ name: id, setExpanded: sectionSetters[id] }));
+    const currentIndex = Math.max(0, activeSections.findIndex((s) => s.name === currentSectionId));
 
-    // step number we're leaving (1-based)
-    const currentStepNumber = Math.min(activeSections.length, currentSectionIndex + 1);
-    const currentSectionName = activeSections[currentSectionIndex]?.name;
+    const currentStepNumber = Math.min(activeSections.length, currentIndex + 1);
+    const currentSectionName = activeSections[currentIndex]?.name;
 
     try {
       await saveCurrentSection(currentStepNumber, currentSectionName);
     } catch {
-      return; // stay on current page if save failed
+      return;
     }
 
-    if (currentSectionIndex < activeSections.length) {
-      activeSections[currentSectionIndex].setExpanded(false);
-      const nextIndex = currentSectionIndex + 1;
-      setCurrentSectionIndex(nextIndex);
+    if (currentIndex < activeSections.length) {
+      activeSections[currentIndex].setExpanded(false);
+      const nextIndex = currentIndex + 1;
 
       if (nextIndex < activeSections.length) {
-        activeSections[nextIndex].setExpanded(true);
+        setCurrentSection(activeSections[nextIndex].name);
       } else {
         navigate("/preview", {
           state: {
@@ -964,21 +987,15 @@ export default function TemplateBuilder() {
     } catch {}
   }, [verificationSteps]);
 
-  // auto-expand next section when new step added
+  // Ensure current section is valid and expanded accordingly
   useEffect(() => {
-    const sections = [
-      { name: "personal-info", setExpanded: setPersonalInfoExpanded },
-      { name: "document-verification", setExpanded: setDocumentVerificationExpanded },
-      { name: "biometric-verification", setExpanded: setBiometricVerificationExpanded },
-    ];
-    const active = sections.filter(
-      (s) => s.name === "personal-info" || verificationSteps.some((vs) => vs.id === s.name),
-    );
-    if (currentSectionIndex < active.length) {
-      const nextSection = active[currentSectionIndex];
-      if (nextSection && nextSection.name !== "personal-info") nextSection.setExpanded(true);
+    if (!orderedSectionIds.includes(currentSectionId)) {
+      setCurrentSection(orderedSectionIds[0] || "personal-info");
+      return;
     }
-  }, [verificationSteps, currentSectionIndex]);
+    setCurrentSection(currentSectionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSectionId, verificationSteps]);
 
   const handleSystemFieldFocus = (key: string) =>
     setSystemFieldAlerts((prev) => ({ ...prev, [key]: true }));
@@ -1031,7 +1048,7 @@ export default function TemplateBuilder() {
 
         {/* Stepper */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
-          <Button variant="ghost" className="text-gray-600 text-sm" onClick={() => navigate("/dashboard")}>
+          <Button variant="ghost" className="text-gray-600 text-sm" onClick={handlePrev}>
             <ChevronLeft className="w-4 h-4 mr-1" />
             Previous
           </Button>
@@ -1138,209 +1155,212 @@ export default function TemplateBuilder() {
           {/* Content */}
           <div className="flex-1 p-4 bg-white overflow-auto">
             <div className="space-y-6">
-              {/* Personal Info */}
-              <div className="border border-gray-300 rounded">
-                <div className="flex items-center gap-2 p-3 border-b border-gray-300 bg-white">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="p-0 h-auto"
-                    onClick={() => setPersonalInfoExpanded(!personalInfoExpanded)}
-                  >
-                    <Minus className="w-5 h-5 text-gray-700" />
-                  </Button>
-                  <h2 className="font-bold text-base text-gray-900">Personal Information</h2>
-                </div>
-
-                {!personalInfoExpanded && (
-                  <div className="px-4 lg:px-9 pb-3">
-                    <p className="text-xs lg:text-[13px] text-[#505258]">
-                      Set up fields to collect basic user details like name, contact.
-                    </p>
-                  </div>
-                )}
-
-                {personalInfoExpanded && (
-                  <div className="p-8">
-                    <div className="mb-6">
-                      <h3 className="font-bold text-base text-gray-900 mb-2">System-required Fields</h3>
-                      <p className="text-sm text-gray-600">
-                        The following fields are required in every template.
-                      </p>
-                    </div>
-
-                    {/* Required fields (readonly) */}
-                    <div className="space-y-4 mb-8">
-                      {/* First Name */}
-                      <div
-                        className={cn(
-                          "rounded-lg border-r border-b border-l bg-white",
-                          systemFieldAlerts.firstName ? "border-blue-500" : "border-gray-300",
-                        )}
-                      >
-                        {systemFieldAlerts.firstName && <div className="h-2 bg-blue-500 rounded-t-lg" />}
-                        <div className="p-4">
-                          {systemFieldAlerts.firstName && (
-                            <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
-                              <Info className="w-5 h-5 text-red-500" />
-                              <span className="text-sm text-gray-900 font-medium">
-                                This field is system-required and cannot be modified.
-                              </span>
-                            </div>
-                          )}
-                          <div className="mb-2">
-                            <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
-                              <span className="text-sm font-semibold text-gray-900">First Name</span>
-                            </div>
-                          </div>
-                          <Input
-                            value={systemFieldValues.firstName}
-                            onFocus={() => handleSystemFieldFocus("firstName")}
-                            onBlur={() => handleSystemFieldBlur("firstName")}
-                            className="border-gray-300 text-gray-600"
-                            readOnly
-                          />
-                        </div>
+              {orderedSectionIds.map((id) => {
+                if (id === "personal-info") {
+                  return (
+                    <div key={id} className="border border-gray-300 rounded">
+                      <div className="flex items-center gap-2 p-3 border-b border-gray-300 bg-white">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="p-0 h-auto"
+                          onClick={() => setPersonalInfoExpanded(!personalInfoExpanded)}
+                        >
+                          <Minus className="w-5 h-5 text-gray-700" />
+                        </Button>
+                        <h2 className="font-bold text-base text-gray-900">Personal Information</h2>
                       </div>
 
-                      {/* Last Name */}
-                      <div
-                        className={cn(
-                          "rounded-lg border-r border-b border-l bg-white",
-                          systemFieldAlerts.lastName ? "border-blue-500" : "border-gray-300",
-                        )}
-                      >
-                        {systemFieldAlerts.lastName && <div className="h-2 bg-blue-500 rounded-t-lg" />}
-                        <div className="p-4">
-                          {systemFieldAlerts.lastName && (
-                            <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
-                              <Info className="w-5 h-5 text-red-500" />
-                              <span className="text-sm text-gray-900 font-medium">
-                                This field is system-required and cannot be modified.
-                              </span>
-                            </div>
-                          )}
-                          <div className="mb-2">
-                            <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
-                              <span className="text-sm font-semibold text-gray-900">Last Name</span>
-                            </div>
-                          </div>
-                          <Input
-                            value={systemFieldValues.lastName}
-                            onFocus={() => handleSystemFieldFocus("lastName")}
-                            onBlur={() => handleSystemFieldBlur("lastName")}
-                            className="border-gray-300 text-gray-600"
-                            readOnly
-                          />
-                        </div>
-                      </div>
-
-                      {/* Email */}
-                      <div
-                        className={cn(
-                          "rounded-lg border-r border-b border-l bg-white",
-                          systemFieldAlerts.email ? "border-blue-500" : "border-gray-300",
-                        )}
-                      >
-                        {systemFieldAlerts.email && <div className="h-2 bg-blue-500 rounded-t-lg" />}
-                        <div className="p-4">
-                          {systemFieldAlerts.email && (
-                            <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
-                              <Info className="w-5 h-5 text-red-500" />
-                              <span className="text-sm text-gray-900 font-medium">
-                                This field is system-required and cannot be modified.
-                              </span>
-                            </div>
-                          )}
-                          <div className="mb-2">
-                            <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
-                              <span className="text-sm font-semibold text-gray-900">Email Address</span>
-                            </div>
-                          </div>
-                          <Input
-                            value={systemFieldValues.email}
-                            onFocus={() => handleSystemFieldFocus("email")}
-                            onBlur={() => handleSystemFieldBlur("email")}
-                            className="border-gray-300 text-gray-600"
-                            readOnly
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Added Fields */}
-                    {addedFields.length > 0 && (
-                      <div>
-                        <div className="mb-4">
-                          <h3 className="font-bold text-base text-gray-900 mb-2">Added Fields</h3>
-                          <p className="text-sm text-gray-600">
-                            Extra fields to collect specific to your verification flow.
+                      {!personalInfoExpanded && (
+                        <div className="px-4 lg:px-9 pb-3">
+                          <p className="text-xs lg:text-[13px] text-[#505258]">
+                            Set up fields to collect basic user details like name, contact.
                           </p>
                         </div>
+                      )}
 
-                        <div className="space-y-4">
-                          {addedFields.map((field) => (
-                            <div key={field.id} className="border border-gray-300 rounded-lg p-5 bg-white">
-                              <div className="flex items-center justify-between mb-3">
-                                <Label className="font-semibold text-sm text-gray-900">
-                                  {field.name}
-                                </Label>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="p-1 h-auto text-red-500 hover:text-red-700"
-                                  onClick={() => removeAddedField(field.id)}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                      {personalInfoExpanded && (
+                        <div className="p-8">
+                          <div className="mb-6">
+                            <h3 className="font-bold text-base text-gray-900 mb-2">System-required Fields</h3>
+                            <p className="text-sm text-gray-600">
+                              The following fields are required in every template.
+                            </p>
+                          </div>
+
+                          <div className="space-y-4 mb-8">
+                            <div
+                              className={cn(
+                                "rounded-lg border-r border-b border-l bg-white",
+                                systemFieldAlerts.firstName ? "border-blue-500" : "border-gray-300",
+                              )}
+                            >
+                              {systemFieldAlerts.firstName && <div className="h-2 bg-blue-500 rounded-t-lg" />}
+                              <div className="p-4">
+                                {systemFieldAlerts.firstName && (
+                                  <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
+                                    <Info className="w-5 h-5 text-red-500" />
+                                    <span className="text-sm text-gray-900 font-medium">
+                                      This field is system-required and cannot be modified.
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="mb-2">
+                                  <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
+                                    <span className="text-sm font-semibold text-gray-900">First Name</span>
+                                  </div>
+                                </div>
+                                <Input
+                                  value={systemFieldValues.firstName}
+                                  onFocus={() => handleSystemFieldFocus("firstName")}
+                                  onBlur={() => handleSystemFieldBlur("firstName")}
+                                  className="border-gray-300 text-gray-600"
+                                  readOnly
+                                />
                               </div>
-                              <div className="text-sm text-gray-500">{field.placeholder}</div>
                             </div>
-                          ))}
+
+                            <div
+                              className={cn(
+                                "rounded-lg border-r border-b border-l bg-white",
+                                systemFieldAlerts.lastName ? "border-blue-500" : "border-gray-300",
+                              )}
+                            >
+                              {systemFieldAlerts.lastName && <div className="h-2 bg-blue-500 rounded-t-lg" />}
+                              <div className="p-4">
+                                {systemFieldAlerts.lastName && (
+                                  <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
+                                    <Info className="w-5 h-5 text-red-500" />
+                                    <span className="text-sm text-gray-900 font-medium">
+                                      This field is system-required and cannot be modified.
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="mb-2">
+                                  <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
+                                    <span className="text-sm font-semibold text-gray-900">Last Name</span>
+                                  </div>
+                                </div>
+                                <Input
+                                  value={systemFieldValues.lastName}
+                                  onFocus={() => handleSystemFieldFocus("lastName")}
+                                  onBlur={() => handleSystemFieldBlur("lastName")}
+                                  className="border-gray-300 text-gray-600"
+                                  readOnly
+                                />
+                              </div>
+                            </div>
+
+                            <div
+                              className={cn(
+                                "rounded-lg border-r border-b border-l bg-white",
+                                systemFieldAlerts.email ? "border-blue-500" : "border-gray-300",
+                              )}
+                            >
+                              {systemFieldAlerts.email && <div className="h-2 bg-blue-500 rounded-t-lg" />}
+                              <div className="p-4">
+                                {systemFieldAlerts.email && (
+                                  <div className="mb-4 p-2 bg-red-50 border-l-2 border-red-400 rounded flex items-center gap-2">
+                                    <Info className="w-5 h-5 text-red-500" />
+                                    <span className="text-sm text-gray-900 font-medium">
+                                      This field is system-required and cannot be modified.
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="mb-2">
+                                  <div className="h-10 px-3 py-2 bg-gray-100 rounded border border-gray-300 flex items-center">
+                                    <span className="text-sm font-semibold text-gray-900">Email Address</span>
+                                  </div>
+                                </div>
+                                <Input
+                                  value={systemFieldValues.email}
+                                  onFocus={() => handleSystemFieldFocus("email")}
+                                  onBlur={() => handleSystemFieldBlur("email")}
+                                  className="border-gray-300 text-gray-600"
+                                  readOnly
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {addedFields.length > 0 && (
+                            <div>
+                              <div className="mb-4">
+                                <h3 className="font-bold text-base text-gray-900 mb-2">Added Fields</h3>
+                                <p className="text-sm text-gray-600">
+                                  Extra fields to collect specific to your verification flow.
+                                </p>
+                              </div>
+
+                              <div className="space-y-4">
+                                {addedFields.map((field) => (
+                                  <div key={field.id} className="border border-gray-300 rounded-lg p-5 bg-white">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <Label className="font-semibold text-sm text-gray-900">
+                                        {field.name}
+                                      </Label>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="p-1 h-auto text-red-500 hover:text-red-700"
+                                        onClick={() => removeAddedField(field.id)}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                    <div className="text-sm text-gray-500">{field.placeholder}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Document Verification */}
-              {verificationSteps.some((s) => s.id === "document-verification") && (
-                <DocumentVerificationSection
-                  isExpanded={documentVerificationExpanded}
-                  onToggle={() => setDocumentVerificationExpanded(!documentVerificationExpanded)}
-                  stateBag={{
-                    allowUploadFromDevice,
-                    setAllowUploadFromDevice,
-                    allowCaptureWebcam,
-                    setAllowCaptureWebcam,
-                    documentHandling,
-                    setDocumentHandling,
-                    selectedCountries,
-                    setSelectedCountries,
-                    selectedDocuments,
-                    setSelectedDocuments,
-                  }}
-                />
-              )}
-
-              {/* Biometric Verification */}
-              {verificationSteps.some((s) => s.id === "biometric-verification") && (
-                <BiometricVerificationSection
-                  isExpanded={biometricVerificationExpanded}
-                  onToggle={() => setBiometricVerificationExpanded(!biometricVerificationExpanded)}
-                  stateBag={{
-                    maxRetries,
-                    setMaxRetries,
-                    askUserRetry,
-                    setAskUserRetry,
-                    blockAfterRetries,
-                    setBlockAfterRetries,
-                    dataRetention,
-                    setDataRetention,
-                  }}
-                />
-              )}
+                      )}
+                    </div>
+                  );
+                }
+                if (id === "document-verification") {
+                  return (
+                    <DocumentVerificationSection
+                      key={id}
+                      isExpanded={documentVerificationExpanded}
+                      onToggle={() => setDocumentVerificationExpanded(!documentVerificationExpanded)}
+                      stateBag={{
+                        allowUploadFromDevice,
+                        setAllowUploadFromDevice,
+                        allowCaptureWebcam,
+                        setAllowCaptureWebcam,
+                        documentHandling,
+                        setDocumentHandling,
+                        selectedCountries,
+                        setSelectedCountries,
+                        selectedDocuments,
+                        setSelectedDocuments,
+                      }}
+                    />
+                  );
+                }
+                if (id === "biometric-verification") {
+                  return (
+                    <BiometricVerificationSection
+                      key={id}
+                      isExpanded={biometricVerificationExpanded}
+                      onToggle={() => setBiometricVerificationExpanded(!biometricVerificationExpanded)}
+                      stateBag={{
+                        maxRetries,
+                        setMaxRetries,
+                        askUserRetry,
+                        setAskUserRetry,
+                        blockAfterRetries,
+                        setBlockAfterRetries,
+                        dataRetention,
+                        setDataRetention,
+                      }}
+                    />
+                  );
+                }
+                return null;
+              })}
             </div>
           </div>
 
